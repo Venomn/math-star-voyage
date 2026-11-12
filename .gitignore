@@ -1,0 +1,11 @@
+godot/.godot/
+.env*
+node_modules/
+.DS_Store
+cloud/catalog.json
+cloud/package.zip
+cloud/deployment.json
+cloud/receipt.json
+cloud/__pycache__/
+
+cloud/live_verify.py

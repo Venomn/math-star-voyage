@@ -1,0 +1,10 @@
+{
+  "name": "math-galaxy",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests.mjs",
+    "start": "python3 -m http.server 4173 --directory dist",
+    "build:godot": "godot --headless --path godot --export-release Web ../dist/voyage/engine.html && node scripts/compress-web.mjs"
+  }
+}

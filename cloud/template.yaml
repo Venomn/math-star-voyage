@@ -1,0 +1,189 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Starbound Math guest-scoped async AgentCore tutoring API
+Parameters:
+  RuntimeArn:
+    Type: String
+  AllowedOrigin:
+    Type: String
+    Default: https://venomn.github.io
+  ArtifactBucket:
+    Type: String
+  ArtifactKey:
+    Type: String
+  DailyLimit:
+    Type: Number
+    Default: 200
+Resources:
+  StateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+  WorkerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: tutor-worker
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/math-star-voyage-*:*
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:UpdateItem, dynamodb:Scan]
+                Resource: !GetAtt StateTable.Arn
+              - Effect: Allow
+                Action: [bedrock-agentcore:InvokeAgentRuntime, bedrock-agentcore:InvokeAgentRuntimeForUser, bedrock-agentcore:StopRuntimeSession]
+                Resource: [!Ref RuntimeArn, !Sub '${RuntimeArn}/runtime-endpoint/DEFAULT']
+  WorkerLog:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/math-star-voyage-worker
+      RetentionInDays: 7
+  Worker:
+    Type: AWS::Lambda::Function
+    DependsOn: WorkerLog
+    Properties:
+      FunctionName: math-star-voyage-worker
+      Runtime: python3.12
+      Handler: handler.handler
+      Role: !GetAtt WorkerRole.Arn
+      MemorySize: 256
+      Timeout: 120
+      Code: {S3Bucket: !Ref ArtifactBucket, S3Key: !Ref ArtifactKey}
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref StateTable
+          RUNTIME_ARN: !Ref RuntimeArn
+          ALLOWED_ORIGIN: !Ref AllowedOrigin
+  AsyncConfig:
+    Type: AWS::Lambda::EventInvokeConfig
+    Properties:
+      FunctionName: !Ref Worker
+      Qualifier: $LATEST
+      MaximumEventAgeInSeconds: 60
+      MaximumRetryAttempts: 0
+  Sweep:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: rate(5 minutes)
+      State: ENABLED
+      Targets:
+        - Id: cleanup
+          Arn: !GetAtt Worker.Arn
+          Input: '{"kind":"sweep"}'
+  SweepPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Worker
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt Sweep.Arn
+  ApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: tutor-api
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/math-star-voyage-*:*
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
+                Resource: !GetAtt StateTable.Arn
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt Worker.Arn
+  ApiLog:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/math-star-voyage-api
+      RetentionInDays: 7
+  ApiFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: ApiLog
+    Properties:
+      FunctionName: math-star-voyage-api
+      Runtime: python3.12
+      Handler: handler.handler
+      Role: !GetAtt ApiRole.Arn
+      MemorySize: 256
+      Timeout: 15
+      Code: {S3Bucket: !Ref ArtifactBucket, S3Key: !Ref ArtifactKey}
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref StateTable
+          RUNTIME_ARN: !Ref RuntimeArn
+          ALLOWED_ORIGIN: !Ref AllowedOrigin
+          WORKER_NAME: !Ref Worker
+          DAILY_LIMIT: !Ref DailyLimit
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: math-star-voyage
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins: [!Ref AllowedOrigin]
+        AllowHeaders: [authorization, content-type]
+        AllowMethods: [GET, POST, OPTIONS]
+        MaxAge: 600
+  Integration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt ApiFunction.Arn
+      PayloadFormatVersion: '2.0'
+      TimeoutInMillis: 15000
+  Route:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: $default
+      Target: !Sub integrations/${Integration}
+  Stage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: $default
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+  ApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApiFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*
+Outputs:
+  ApiUrl:
+    Value: !GetAtt HttpApi.ApiEndpoint
+  TableName:
+    Value: !Ref StateTable
