@@ -12,3 +12,28 @@ test('journey covers each topic exactly once',()=>{assert.deepEqual(sectors.flat
 test('energy comes only from first mastery and is never farmed',()=>{let j=freshJourney();assert.equal(energy(j),0);assert.equal(claim(j,'count'),false);for(let i=0;i<3;i++)applyAnswer(j.learning,'count',question('count',i),true,false);assert.equal(claim(j,'count'),true);assert.equal(claim(j,'count'),false);assert.equal(energy(j),3);applyAnswer(j.learning,'count',question('count',4),false,false);assert.equal(energy(j),3);assert.equal(claim(j,'count'),false);});
 test('new sectors cost once, returns are free and insufficient energy never mutates state',()=>{let j=freshJourney();let before=JSON.stringify(j);assert.equal(travel(j,1),false);assert.equal(JSON.stringify(j),before);for(let i=0;i<3;i++)applyAnswer(j.learning,'count',question('count',i),true,false);claim(j,'count');assert.equal(travel(j,1),true);assert.equal(energy(j),0);assert.equal(travel(j,0),true);assert.equal(travel(j,1),true);assert.equal(energy(j),0);assert.equal(travel(j,2),false);});
 test('reload restores atomic destination and reward ledger; old mastered state migrates',()=>{let s=blank();for(let i=0;i<3;i++)applyAnswer(s,'count',question('count',i),true,false);let j=restoreJourney(null,JSON.stringify(s));assert.equal(energy(j),3);travel(j,1);let reload=restoreJourney(JSON.stringify(j),null);assert.equal(reload.current,1);assert.equal(energy(reload),0);assert.equal(claim(reload,'count'),false);});
+import{START_TOPIC,links,ancestors,relations,foundationPlan,restoreSupport}from'./dist/knowledge.js';
+test('one explicit start reaches every theme; every relation has an explanation and both directions',()=>{
+ assert.equal(START_TOPIC,'count');assert.deepEqual(topics.filter(t=>!t.pre.length).map(t=>t.id),[START_TOPIC]);
+ for(const t of topics){if(t.id!==START_TOPIC)assert(ancestors(t.id).includes(START_TOPIC));}
+ for(const e of links){assert(e.reason?.length>8);assert(relations(blank(),e.to).before.some(x=>x.from===e.from&&x.reason===e.reason));assert(relations(blank(),e.from).after.some(x=>x.to===e.to&&x.reason===e.reason));}
+});
+test('foundation route finds the earliest unchecked dependency without inventing weakness',()=>{
+ const s=blank(),before=JSON.stringify(s);const p=foundationPlan(s,'quad');assert.deepEqual(p.route,['count','signed','expr','factor','quad']);assert.equal(JSON.stringify(s),before);
+ for(let i=0;i<3;i++)applyAnswer(s,'count',question('count',i),true,false);
+ assert.equal(foundationPlan(s,'quad').target,'signed');assert.equal(status(s,'signed'),'未探索');
+});
+test('mastered prerequisites are review suggestions; failing prerequisites reopen the route',()=>{
+ const s=blank();for(const id of ['count','signed','expr','factor','equation'])for(let i=0;i<3;i++)applyAnswer(s,id,question(id,i),true,false);
+ assert.equal(foundationPlan(s,'quad').review,true);
+ applyAnswer(s,'signed',question('signed',4),false,false);
+ // A mastered direct prerequisite need not imply every ancestor is still mastered.
+ assert.equal(status(s,'signed'),'补强');
+ assert.equal(foundationPlan(s,'expr').target,'signed');assert.equal(foundationPlan(s,'quad').target,'signed');
+ assert.deepEqual(foundationPlan(s,'count').route,['count']);
+});
+test('cross-sector support preserves navigation and energy; persisted routes reject unrelated or corrupt targets',()=>{
+ const j=freshJourney();const before=JSON.stringify(j);const p=foundationPlan(j.learning,'pyth');assert.equal(p.target,'count');assert.equal(JSON.stringify(j),before);
+ assert.deepEqual(restoreSupport('{"origin":"pyth","target":"power"}'),{origin:'pyth',target:'power'});
+ for(const raw of ['{}','{broken','{"origin":"pyth","target":"prob"}','{"origin":"missing","target":"count"}','{"origin":"count","target":"count"}'])assert.equal(restoreSupport(raw),null);
+});
