@@ -20,6 +20,10 @@ class Boundaries(unittest.TestCase):
   for origin in ['', 'https://evil.example']:
    with patch.object(h,'table') as t,self.assertRaises(h.ApiError):
     h.http({'headers':{'origin':origin},'requestContext':{'http':{'method':'POST','sourceIp':'127.0.0.1'}},'rawPath':'/chat'});t.assert_not_called()
+ def test_browser_preflight_is_allowed_before_guest_auth(self):
+  event={'headers':{'origin':h.ORIGIN,'access-control-request-method':'POST','access-control-request-headers':'authorization,content-type'},'requestContext':{'http':{'method':'OPTIONS','sourceIp':'127.0.0.1'}},'rawPath':'/chat'}
+  with patch.object(h,'get') as get:
+   self.assertEqual(h.http(event)['statusCode'],204);get.assert_not_called()
  def test_partial_or_tool_only_stream_never_succeeds(self):
   for raw in ['data: {"event":{"contentBlockDelta":{"delta":{"text":"partial"}}}}','data: {"event":{"messageStop":{"stopReason":"tool_use"}}}','data: {"error":"fail"}']:
    with self.assertRaises(RuntimeError):h.parse_stream(raw)

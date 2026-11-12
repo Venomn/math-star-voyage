@@ -98,6 +98,7 @@ def http(event):
  if headers.get('origin')!=ORIGIN:raise ApiError(403,'来源不受支持。')
  method=event['requestContext']['http']['method'];path=event.get('rawPath','')
  ip=digest(event['requestContext']['http']['sourceIp'])
+ if method=='OPTIONS':return response(204,{})
  if method=='GET' and path=='/health':return response(200,{'agentcore':True,'mode':'cloud','policy':POLICY})
  if method=='POST':
   raw=event.get('body') or '{}'
