@@ -107,7 +107,7 @@ body {
 			<div id="status-notice"></div>
 		</div>
 
-		<script src="wasm-loader.js"></script>
+		<script src="wasm-loader.js?v=3"></script>
 		<script src="engine.js"></script>
 		<script>
 const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"ensureCrossOriginIsolationHeaders":true,"executable":"engine","experimentalVK":false,"fileSizes":{"engine.pck":53568,"engine.wasm":43699190},"focusCanvas":true,"gdextensionLibs":[]};
@@ -149,6 +149,7 @@ const engine = new Engine(GODOT_CONFIG);
 	}
 
 	function displayFailureNotice(err) {
+		parent.postMessage(JSON.stringify({type:'loading',phase:'error',message:'宇宙启动失败，请重试或打开轻量知识图谱。'}),location.origin);
 		console.error(err);
 		if (err instanceof Error) {
 			setStatusNotice(err.message);
