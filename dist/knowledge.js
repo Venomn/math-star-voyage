@@ -1,4 +1,4 @@
-import {topics,status} from './learning.js';
+import {topics,status} from './learning.js?v=7';
 export const START_TOPIC='count';
 const reasons={
  'count:fraction':'分数与比例中的计算，需要先会四则运算。','count:signed':'在四则运算基础上，学习正负数的运算。',

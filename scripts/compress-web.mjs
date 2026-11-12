@@ -1,7 +1,10 @@
+import{createHash}from'node:crypto';
 import{readFileSync,writeFileSync,unlinkSync,existsSync}from'node:fs';import{gzipSync,gunzipSync}from'node:zlib';import assert from'node:assert/strict';
 const dir=new URL('../dist/voyage/',import.meta.url),rawPath=new URL('engine.wasm',dir),zipPath=new URL('engine.wasm.gz',dir);
 const raw=existsSync(rawPath)?readFileSync(rawPath):gunzipSync(readFileSync(zipPath));const zipped=gzipSync(raw,{level:9});assert.deepEqual(gunzipSync(zipped),raw);writeFileSync(zipPath,zipped);
 writeFileSync(new URL('wasm-loader.js',dir),readFileSync(new URL('./wasm-loader.template.js',import.meta.url),'utf8').replaceAll('__ZIP_SIZE__',String(zipped.length)).replaceAll('__RAW_SIZE__',String(raw.length)));
 let html=readFileSync(new URL('engine.html',dir),'utf8');if(!html.includes('src="wasm-loader.js'))html=html.replace('<script src="engine.js"></script>','<script src="wasm-loader.js"></script>\n\t\t<script src="engine.js"></script>');html=html.replace('src="wasm-loader.js"','src="wasm-loader.js?v=3"');
 if(!html.includes("phase:'error'"))html=html.replace('console.error(err);',"parent.postMessage(JSON.stringify({type:'loading',phase:'error',message:'宇宙启动失败，请重试或打开轻量知识图谱。'}),location.origin);\n\t\tconsole.error(err);");
+const pack=readFileSync(new URL('engine.pck',dir)),packName='world-'+createHash('sha256').update(pack).digest('hex').slice(0,12)+'.pck';writeFileSync(new URL(packName,dir),pack);
+html=html.replace(/const GODOT_CONFIG = (.*);/,(_,json)=>{const config=JSON.parse(json);config.mainPack=packName;config.fileSizes[packName]=pack.length;return 'const GODOT_CONFIG = '+JSON.stringify(config)+';';});
 writeFileSync(new URL('engine.html',dir),html);if(existsSync(rawPath))unlinkSync(rawPath);console.log(`Godot WASM: ${raw.length} -> ${zipped.length} bytes; round-trip verified`);

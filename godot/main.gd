@@ -1,8 +1,6 @@
 extends Node3D
 var camera: Camera3D
 var system: Node3D
-var ship: Node3D
-var engine: MeshInstance3D
 var planets: Array = []
 var labels: Array = []
 var sector := 0
@@ -22,6 +20,7 @@ var elapsed := 0.0
 var tick := 0.0
 var callback: JavaScriptObject
 var mastered: Array = []
+var buildings: Dictionary = {}
 var colors := [Color("55cedb"),Color("aa98fa"),Color("f3bd73"),Color("87e3b4")]
 var ids := [["count","fraction","signed","power","expr","factor"],["equation","system","ineq","quad","linear","inverse","parabola"],["angle","triangle","pyth","similar","circle"],["stats","prob"]]
 
@@ -41,7 +40,6 @@ func _ready():
 	camera.near = 0.1
 	add_child(camera)
 	make_stars()
-	make_ship()
 	build_system(0)
 	if OS.has_feature("web"):
 		callback = JavaScriptBridge.create_callback(_on_message)
@@ -129,29 +127,6 @@ func make_stars():
 		n.position = Vector3(-100+i*30,35+sin(i)*20,-140)
 		halo(n,150,Color(.16,.20,.48,.7))
 
-func make_ship():
-	ship = Node3D.new()
-	add_child(ship)
-	var hull := MeshInstance3D.new()
-	var cone := CylinderMesh.new()
-	cone.top_radius = 0
-	cone.bottom_radius = 0.35
-	cone.height = 1.7
-	hull.mesh = cone
-	hull.material_override = mat(Color("dbe6f1"))
-	hull.rotation.x = -PI/2
-	ship.add_child(hull)
-	var wings := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = Vector3(1.7,.08,.55)
-	wings.mesh = box
-	wings.material_override = mat(Color("7597b7"))
-	wings.position.z = .35
-	ship.add_child(wings)
-	engine = sphere(.19,mat(Color("74e6ff"),true),ship)
-	engine.position.z = .9
-	halo(engine,2.5,Color(.1,.7,1.,.8))
-
 func build_system(index: int):
 	sector = index
 	if is_instance_valid(system):
@@ -207,8 +182,10 @@ func build_system(index: int):
 		pivot.add_child(beacon)
 		orbit(size_planet*1.3,Color("b9f2a0"),beacon)
 		beacon.visible = mastered.has(ids[index][i])
-		planets.append({"node":planet,"pivot":pivot,"id":ids[index][i],"radius":size_planet,"beacon":beacon})
-	ship.position = Vector3(8,2,11)
+		var city := Node3D.new()
+		pivot.add_child(city)
+		planets.append({"city":city,"city_count":-1,"node":planet,"pivot":pivot,"id":ids[index][i],"radius":size_planet,"beacon":beacon})
+	update_buildings()
 	target = Vector3.ZERO
 	distance = 56.0
 	flying = false
@@ -229,9 +206,6 @@ func _on_message(args: Array):
 					warp(index)
 				else:
 					build_system(index)
-		"fly":
-			flying = not flying
-			emit_web({"type":"mode","flying":flying})
 		"overview":
 			flying = false
 			target = Vector3.ZERO
@@ -241,11 +215,14 @@ func _on_message(args: Array):
 		"focus":
 			for p in planets:
 				if p.id == data.get("id"):
-					target = p.pivot.position
-					distance = 17
+					target = p.pivot.position + Vector3(0,0.8,0)
+					distance = 10
 		"controls":
 			touch_turn = float(data.get("turn",0))
 			touch_thrust = float(data.get("thrust",0))
+		"buildings":
+			buildings = data.get("counts",{})
+			update_buildings()
 		"mastered":
 			mastered = data.get("ids",[])
 			for p in planets:
@@ -262,13 +239,12 @@ func warp(index: int):
 	flying = false
 	emit_web({"type":"warp_started"})
 	var tween := create_tween()
-	tween.tween_property(camera,"fov",100.0,1.0)
-	tween.parallel().tween_property(ship,"position",ship.position+Vector3(0,10,-90),1.8)
+	tween.tween_property(camera,"fov",62.0,0.3)
 	await tween.finished
 	build_system(index)
-	camera.fov = 75
+	camera.fov = 62
 	var settle := create_tween()
-	settle.tween_property(camera,"fov",48.0,1.1)
+	settle.tween_property(camera,"fov",48.0,0.4)
 	await settle.finished
 	warping = false
 	emit_web({"type":"warp_done"})
@@ -295,19 +271,6 @@ func _process(delta):
 	if not paused:
 		for p in planets:
 			p.node.rotation.y += delta*.045
-		if flying and not warping:
-			var turn := float(Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT))-float(Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT))
-			var thrust := float(Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP))-float(Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN))
-			heading -= (turn+touch_turn)*delta*1.5
-			speed = move_toward(speed,(thrust+touch_thrust)*13,delta*7)
-			ship.position += Vector3(sin(heading),0,-cos(heading))*speed*delta
-			ship.position = ship.position.limit_length(65)
-			ship.rotation.y = -heading
-			target = target.lerp(ship.position,delta*2)
-			distance = lerpf(distance,12,delta*2)
-		else:
-			ship.position.y = 2+sin(elapsed)*.16
-	engine.scale = Vector3(1,1,1+absf(speed)*.15)
 	var offset := Vector3(sin(yaw)*cos(pitch),sin(pitch),cos(yaw)*cos(pitch))*distance
 	camera.position = camera.position.lerp(target+offset,minf(1,delta*5))
 	camera.look_at(target,Vector3.UP)
@@ -317,7 +280,58 @@ func _process(delta):
 		var pins := []
 		var viewport_size := get_viewport().get_visible_rect().size
 		for p in planets:
-			var point: Vector3 = p.pivot.global_position+Vector3(0,p.radius+0.6,0)
+			var point: Vector3 = p.pivot.global_position+Vector3(0,p.radius+0.6+(minf(float(p.city_count),4.0)+clampf(float(p.city_count)-12.0,0.0,8.0))*0.34,0)
 			var screen := camera.unproject_position(point)
 			pins.append({"id":p.id,"x":screen.x/viewport_size.x,"y":screen.y/viewport_size.y,"visible":not camera.is_position_behind(point)})
 		emit_web({"type":"positions","pins":pins,"speed":roundf(absf(speed)*10),"flying":flying})
+
+func block(size: Vector3, color: Color, parent: Node3D, position_value: Vector3, glow := false) -> MeshInstance3D:
+	var node := MeshInstance3D.new()
+	var shape := BoxMesh.new()
+	shape.size = size
+	node.mesh = shape
+	node.material_override = mat(color,glow)
+	node.position = position_value
+	parent.add_child(node)
+	return node
+
+func update_buildings():
+	for p in planets:
+		var count := clampi(int(buildings.get(p.id,0)),0,36)
+		if p.city_count == count:
+			continue
+		var previous: int = p.city_count
+		p.city_count = count
+		for child in p.city.get_children():
+			p.city.remove_child(child)
+			child.queue_free()
+		for tower in range(3):
+			var floors := clampi(count-tower*4,0,4)+clampi(count-12-tower*8,0,8)
+			if floors <= 0:
+				continue
+			var x: float = [0.0,-0.62,0.62][tower]
+			var z := -0.15 if tower==1 else 0.25
+			var ground := sqrt(maxf(0.1,p.radius*p.radius-x*x-z*z))
+			block(Vector3(0.6,0.08,0.6),Color("729d88"),p.city,Vector3(x,ground,z))
+			for floor_index in range(floors):
+				var unit := Node3D.new()
+				p.city.add_child(unit)
+				unit.position = Vector3(x,ground+0.06+floor_index*0.36,z)
+				var colors_city := [Color("f4deaf"),Color("9cdbce"),Color("eeb0a0")]
+				block(Vector3(0.48,0.34,0.48),colors_city[tower],unit,Vector3(0,0.17,0))
+				for window_x in [-0.12,0.12]:
+					block(Vector3(0.09,0.12,0.018),Color("fff3a3"),unit,Vector3(window_x,0.19,0.249),true)
+				if previous >= 0 and count > previous and (tower*4+floor_index if floor_index<4 else 12+tower*8+floor_index-4) >= previous:
+					unit.scale = Vector3.ONE*0.01
+					create_tween().tween_property(unit,"scale",Vector3.ONE,0.55).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			var roof := MeshInstance3D.new()
+			var cone := CylinderMesh.new()
+			cone.top_radius = 0
+			cone.bottom_radius = 0.43
+			cone.height = 0.3
+			cone.radial_segments = 4
+			roof.mesh = cone
+			roof.material_override = mat(Color("466f8a"))
+			roof.rotation.y = PI/4
+			roof.position = Vector3(x,ground+0.06+floors*0.36+0.13,z)
+			p.city.add_child(roof)

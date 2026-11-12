@@ -1,6 +1,6 @@
-import {topics,status} from './learning.js';
-import {links,relations,foundationPlan,topicById,START_TOPIC,restoreSupport} from './knowledge.js';
-import {sectors} from './journey.js';
+import {topics,status} from './learning.js?v=7';
+import {links,relations,foundationPlan,topicById,START_TOPIC,restoreSupport} from './knowledge.js?v=7';
+import {sectors} from './journey.js?v=7';
 const $=id=>document.getElementById(id),sectorOf=id=>sectors.findIndex(s=>s.ids.includes(id));
 export function knowledgeUI(api){
  let selected=START_TOPIC,positions=[],support=null,announced='';
@@ -18,7 +18,7 @@ export function knowledgeUI(api){
    if(!items.length){const p=document.createElement('p');p.textContent=key==='before'?'这是本版统一起点，没有更早的前置主题。':'本版暂未收录更后续的主题，可以巩固或探索其他支线。';box.append(p);}
    for(const e of items){const row=document.createElement('article');row.className='relation-item';const b=button(`${e.topic.name} · ${e.status} ↗`,()=>{api.select(e.topic.id);$('relationPanel').open=true;});row.append(b);const p=document.createElement('p');p.textContent=e.reason;row.append(p);const small=document.createElement('small');small.textContent=sectors[sectorOf(e.topic.id)].name+(sectorOf(e.topic.id)!==api.current()?' · 跨星系':'');row.append(small);box.append(row);}
   }
-  const remote=sectorOf(id)!==api.current();$('relationPractice').textContent=remote?'前往这颗星球 · 按星系航行规则':'降落练习 · '+r.topic.name;
+  const remote=sectorOf(id)!==api.current();$('relationPractice').textContent=remote?'前往这颗星球 · 自由探索':'降落练习 · '+r.topic.name;
   $('relationPractice').onclick=()=>api.visit(id);
   $('basisBanner').hidden=!support;
   if(support){$('basisBannerText').textContent=`补给航线：${topicById(support.origin).name} → ${topicById(support.target).name}。进度已保留，可继续补基础或返回原挑战。`;}
